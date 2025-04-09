@@ -1,7 +1,7 @@
 from codefind import ConformException, code_registry as db
 
 from .codetools import CodeFile
-from .live import Watcher, watch
+from .live import Watcher, watch, get_watch_instance
 from .recode import Recoder, make_recoder, virtual_file
 from .register import registry
 from .utils import glob_filter
@@ -13,6 +13,7 @@ __all__ = [
     "CodeFile",
     "Watcher",
     "watch",
+    "get_watch_instance",
     "Recoder",
     "make_recoder",
     "virtual_file",

@@ -1,5 +1,7 @@
 import argparse
+import ast
 import code
+import functools
 import importlib
 import logging
 import os
@@ -8,6 +10,9 @@ import threading
 import traceback
 from dataclasses import dataclass
 from types import ModuleType
+import types
+import inspect
+from typing import Any, Optional
 
 import blessed
 from ovld import ovld
@@ -23,7 +28,12 @@ from .version import version
 log = logging.getLogger(__name__)
 T = blessed.Terminal()
 DEFAULT_DEBOUNCE = 0.05
+RELOAD_ON_CONTINUE = True
 
+class ReloadException(ValueError):
+    """Exception when hot-restart fails to reload a function."""
+
+    pass
 
 @dataclass
 class WatchOperation:
@@ -80,40 +90,52 @@ def conservative_logger(event):
 
 class Watcher:
     def __init__(self, registry, debounce=DEFAULT_DEBOUNCE, poll=False):
+        
         if poll:
             self.observer = PollingObserverVFS(
                 stat=os.stat, listdir=os.scandir, polling_interval=poll
             )
         else:
             self.observer = Observer()
+            
         self.registry = registry
         self.registry.precache_activity.register(self.on_prepare)
         self.debounce = debounce
         self.poll = poll
         self.prerun = EventSource()
         self.postrun = EventSource()
+    
 
     def on_prepare(self, module_name, filename):
+        """Register a file to be watched."""
         JuriggedHandler(self, filename).schedule(self.observer)
         self.registry.log(WatchOperation(filename))
-
+        
     def refresh(self, path):
+        """Refresh a file or module."""
         cf = self.registry.get(path)
-        try:
-            self.prerun.emit(path, cf)
-            cf.refresh()
-            self.postrun.emit(path, cf)
-        except Exception as exc:
-            self.registry.log(exc)
+        if cf:
+            try:
+                self.prerun.emit(path, cf)
+                cf.refresh()
+                self.postrun.emit(path, cf)
+            except Exception as exc:
+                self.registry.log(exc)
+        else:
+            self.registry.log(f"Could not find {path} in registry")
 
     def start(self):
+        """Start the file watcher."""
         self.observer.start()
 
     def stop(self):
+        """Stop the file watcher."""
         self.observer.stop()
 
     def join(self):
+        """Wait for the file watcher to finish."""
         self.observer.join()
+
 
 
 class JuriggedHandler(FileSystemEventHandler):
@@ -243,7 +265,15 @@ def find_runner(opts, pattern, prepare=None):  # pragma: no cover
         mod = ModuleType("__main__")
         return mod, None
 
-
+watch_instance = None
+#Get/set the global watch instance
+def get_watch_instance() -> Watcher:
+    global watch_instance
+    return watch_instance # type: ignore
+def set_watch_instance(instance):
+    global watch_instance
+    watch_instance = instance
+    
 def cli():  # pragma: no cover
     sys.path.insert(0, os.path.abspath(os.curdir))
 
@@ -266,6 +296,7 @@ def cli():  # pragma: no cover
         action="append",
         help="Wildcard path/directory for which files to watch",
     )
+
     parser.add_argument(
         "--debounce",
         "-d",
@@ -277,6 +308,7 @@ def cli():  # pragma: no cover
         type=float,
         help="Poll for changes using the given interval",
     )
+
     parser.add_argument(
         "-m",
         dest="module",
@@ -370,8 +402,10 @@ def cli():  # pragma: no cover
                 )
 
     mod, run = find_runner(opts, pattern, prepare=prepare)
-    watch(**watch_args)
-
+    watch_instance = watch(**watch_args)
+    
+    set_watch_instance(watch_instance)
+    
     if run is None:
         banner = None
         opts.interactive = True

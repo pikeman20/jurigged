@@ -4,7 +4,7 @@ import ast
 import re
 import sys
 from abc import abstractmethod
-from ast import _splitlines_no_ff as _splitlines
+from ast import _splitlines_no_ff as _splitlines # type: ignore
 from collections import Counter
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
